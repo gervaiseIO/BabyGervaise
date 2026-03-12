@@ -1,0 +1,8 @@
+{
+  "default_previous_context": "medium",
+  "vector_dimensions": 128,
+  "memory_salience_threshold": 0.6,
+  "stream_chunk_size": 32,
+  "max_recent_messages_per_turn": 32,
+  "max_model_logs": 50
+}
