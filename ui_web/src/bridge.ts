@@ -32,6 +32,10 @@ export function bootstrap() {
   sendCommand("request_overview");
 }
 
+export function requestOverview() {
+  sendCommand("request_overview");
+}
+
 export function submitMessage(turnId: string, text: string) {
   sendCommand("send_message", {
     turnId,
@@ -43,4 +47,3 @@ export function submitMessage(turnId: string, text: string) {
 export function updateContextLevel(level: ContextLevel) {
   sendCommand("set_context_level", { level });
 }
-

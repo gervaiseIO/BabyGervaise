@@ -3,11 +3,15 @@ package io.gervaise.babygervaise.bridge
 import android.webkit.JavascriptInterface
 import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class WebAppBridge(
     private val nativeCore: NativeBabyGervaise,
     private val emitToWeb: (eventType: String, payloadJson: String) -> Unit,
 ) {
+    private val coreExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+
     @JavascriptInterface
     fun postMessage(payloadJson: String) {
         runCatching {
@@ -24,7 +28,21 @@ class WebAppBridge(
                     val turnId = command.payload.optString("turnId", UUID.randomUUID().toString())
                     val text = command.payload.getString("text")
                     val inputSource = command.payload.optString("inputSource", "text")
-                    nativeCore.submitUserTurn(turnId, text, inputSource)
+                    coreExecutor.execute {
+                        runCatching {
+                            nativeCore.submitUserTurn(turnId, text, inputSource)
+                        }.onFailure { error ->
+                            emitToWeb(
+                                "assistant_error",
+                                JSONObject(
+                                    mapOf(
+                                        "turnId" to turnId,
+                                        "error" to (error.message ?: "Unknown bridge failure"),
+                                    ),
+                                ).toString(),
+                            )
+                        }
+                    }
                 }
             }
         }.onFailure { error ->
@@ -53,4 +71,3 @@ internal data class WebCommand(
     val type: String,
     val payload: JSONObject,
 )
-

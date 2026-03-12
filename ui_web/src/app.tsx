@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 
-import { bootstrap, listenToCoreEvents, submitMessage, updateContextLevel } from "./bridge";
+import { bootstrap, listenToCoreEvents, requestOverview, submitMessage, updateContextLevel } from "./bridge";
 import { BootstrapState, ChatMessage, ContextLevel, CoreEvent, OverviewSnapshot } from "./types";
 
 type Screen = "chat" | "overview";
@@ -50,6 +50,24 @@ function nextTurnId() {
   return globalThis.crypto?.randomUUID?.() ?? `turn-${Date.now()}`;
 }
 
+function ensureAssistantPlaceholder(messages: ChatMessage[], turnId: string) {
+  return messages.some((message) => message.turn_id === turnId && message.role === "assistant")
+    ? messages
+    : [...messages, createLocalMessage("assistant", "", turnId)];
+}
+
+function replaceAssistantMessage(messages: ChatMessage[], turnId: string, nextMessage: ChatMessage) {
+  let replaced = false;
+  const updated = messages.map((message) => {
+    if (message.turn_id === turnId && message.role === "assistant") {
+      replaced = true;
+      return nextMessage;
+    }
+    return message;
+  });
+  return replaced ? updated : [...updated, nextMessage];
+}
+
 export function App() {
   const [screen, setScreen] = useState<Screen>("chat");
   const [bootstrapState, setBootstrapState] = useState<BootstrapState>(emptyBootstrap);
@@ -57,6 +75,9 @@ export function App() {
   const [draft, setDraft] = useState("");
   const [toolStatus, setToolStatus] = useState<string | null>(null);
   const [pendingTurnId, setPendingTurnId] = useState<string | null>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isPending = pendingTurnId !== null;
 
   useEffect(() => {
     const unsubscribe = listenToCoreEvents((event) => {
@@ -65,6 +86,37 @@ export function App() {
     bootstrap();
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    const applyViewportHeight = () => {
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty("--app-height", `${viewportHeight}px`);
+    };
+
+    applyViewportHeight();
+    window.visualViewport?.addEventListener("resize", applyViewportHeight);
+    window.addEventListener("resize", applyViewportHeight);
+
+    return () => {
+      window.visualViewport?.removeEventListener("resize", applyViewportHeight);
+      window.removeEventListener("resize", applyViewportHeight);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (screen !== "chat") {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      timelineRef.current?.lastElementChild?.scrollIntoView({
+        block: "end",
+        behavior: "smooth",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [bootstrapState.messages.length, pendingTurnId, screen]);
 
   const handleCoreEvent = (event: CoreEvent) => {
     if (event.type === "bootstrap_state") {
@@ -91,10 +143,10 @@ export function App() {
 
     if (event.type === "assistant_started") {
       setPendingTurnId(event.payload.turnId);
-      setToolStatus(null);
+      setToolStatus("Gervaise is thinking.");
       setBootstrapState((current) => ({
         ...current,
-        messages: [...current.messages, createLocalMessage("assistant", "", event.payload.turnId)],
+        messages: ensureAssistantPlaceholder(current.messages, event.payload.turnId),
       }));
       return;
     }
@@ -113,14 +165,12 @@ export function App() {
 
     if (event.type === "assistant_completed") {
       setPendingTurnId(null);
+      setToolStatus("HGIE ready.");
       setBootstrapState((current) => ({
         ...current,
-        messages: current.messages.map((message) =>
-          message.turn_id === event.payload.turnId && message.role === "assistant"
-            ? event.payload.message
-            : message,
-        ),
+        messages: replaceAssistantMessage(current.messages, event.payload.turnId, event.payload.message),
       }));
+      requestOverview();
       return;
     }
 
@@ -132,6 +182,7 @@ export function App() {
     if (event.type === "assistant_error") {
       setPendingTurnId(null);
       setToolStatus(event.payload.error);
+      requestOverview();
     }
   };
 
@@ -143,18 +194,25 @@ export function App() {
   const onSubmit = (event: Event) => {
     event.preventDefault();
     const text = draft.trim();
-    if (!text) {
+    if (!text || isPending) {
       return;
     }
 
     const turnId = nextTurnId();
     setBootstrapState((current) => ({
       ...current,
-      messages: [...current.messages, createLocalMessage("user", text, turnId)],
+      messages: [
+        ...current.messages,
+        createLocalMessage("user", text, turnId),
+        createLocalMessage("assistant", "", turnId),
+      ],
     }));
     setDraft("");
     setPendingTurnId(turnId);
-    submitMessage(turnId, text);
+    setToolStatus("Sending to HGIE...");
+
+    const scheduleSend = window.requestAnimationFrame ?? ((callback: FrameRequestCallback) => window.setTimeout(callback, 0));
+    scheduleSend(() => submitMessage(turnId, text));
   };
 
   const changeContextLevel = (level: ContextLevel) => {
@@ -163,21 +221,31 @@ export function App() {
     updateContextLevel(level);
   };
 
+  const toggleScreen = () => {
+    const nextScreen = screen === "chat" ? "overview" : "chat";
+    setScreen(nextScreen);
+    if (nextScreen === "overview") {
+      requestOverview();
+    } else {
+      window.requestAnimationFrame(() => textareaRef.current?.scrollIntoView({ block: "nearest" }));
+    }
+  };
+
   return (
     <div className="shell">
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Continuous Intelligence Prototype</p>
+        <p className="eyebrow">Continuous Intelligence Prototype</p>
+        <div className="topbar-row">
           <h1>Baby Gervaise</h1>
+          <button className="toggle topbar-toggle" onClick={toggleScreen}>
+            {screen === "chat" ? "Overview" : "Back to Chat"}
+          </button>
         </div>
-        <button className="toggle" onClick={() => setScreen(screen === "chat" ? "overview" : "chat")}>
-          {screen === "chat" ? "Overview" : "Back to Chat"}
-        </button>
       </header>
 
       {screen === "chat" ? (
         <section className="chat-screen">
-          <div className="timeline" data-testid="timeline">
+          <div ref={timelineRef} className="timeline" data-testid="timeline">
             {bootstrapState.messages.length === 0 ? (
               <article className="empty-state">
                 <h2>One conversation. No reset.</h2>
@@ -200,12 +268,13 @@ export function App() {
 
           <form className="composer" onSubmit={onSubmit}>
             <textarea
+              ref={textareaRef}
               placeholder="Tell Gervaise what you need."
               rows={3}
               value={draft}
               onInput={(event) => setDraft((event.target as HTMLTextAreaElement).value)}
             />
-            <button type="submit">Send</button>
+            <button type="submit" disabled={isPending}>{isPending ? "Sending..." : "Send"}</button>
           </form>
         </section>
       ) : (
@@ -297,4 +366,3 @@ function StatsCard({ title, lines }: StatsCardProps) {
     </article>
   );
 }
-

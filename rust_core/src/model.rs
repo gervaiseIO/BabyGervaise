@@ -50,12 +50,20 @@ impl OpenAiCompatibleModel {
     }
 
     fn request_body(&self, request: &ModelRequest) -> Value {
-        json!({
+        let mut body = json!({
             "model": self.config.model,
             "temperature": self.config.temperature,
             "stream": self.config.stream,
             "messages": request.messages,
-        })
+        });
+
+        if self.config.stream && self.config.provider.eq_ignore_ascii_case("openai") {
+            body["stream_options"] = json!({
+                "include_usage": true
+            });
+        }
+
+        body
     }
 
     fn extract_message_content(&self, body: &str) -> Result<(String, Option<i64>, Option<i64>)> {
@@ -114,6 +122,55 @@ impl OpenAiCompatibleModel {
         }
 
         Ok((raw_output, input_tokens, output_tokens))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_model(stream: bool) -> OpenAiCompatibleModel {
+        OpenAiCompatibleModel {
+            config: ModelConfig {
+                provider: "openai".to_owned(),
+                api_key: "test-key".to_owned(),
+                model: "gpt-4o-mini".to_owned(),
+                endpoint: "https://api.openai.com/v1/chat/completions".to_owned(),
+                temperature: 0.3,
+                timeout_ms: 1_000,
+                stream,
+            },
+            client: Client::builder().build().unwrap(),
+        }
+    }
+
+    #[test]
+    fn request_body_includes_stream_usage_for_openai_streams() {
+        let model = test_model(true);
+        let body = model.request_body(&ModelRequest {
+            messages: vec![ModelMessage {
+                role: "user".to_owned(),
+                content: "Hello".to_owned(),
+            }],
+        });
+
+        assert_eq!(
+            body.pointer("/stream_options/include_usage").and_then(Value::as_bool),
+            Some(true),
+        );
+    }
+
+    #[test]
+    fn request_body_omits_stream_usage_when_streaming_disabled() {
+        let model = test_model(false);
+        let body = model.request_body(&ModelRequest {
+            messages: vec![ModelMessage {
+                role: "user".to_owned(),
+                content: "Hello".to_owned(),
+            }],
+        });
+
+        assert!(body.get("stream_options").is_none());
     }
 }
 
