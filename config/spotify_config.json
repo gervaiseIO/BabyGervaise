@@ -1,0 +1,10 @@
+{
+  "client_id": "YOUR_CLIENT_ID",
+  "client_secret": "YOUR_CLIENT_SECRET",
+  "redirect_uri": "babygervaise://spotify/callback",
+  "scopes": [
+    "user-read-playback-state",
+    "user-modify-playback-state",
+    "user-read-currently-playing"
+  ]
+}

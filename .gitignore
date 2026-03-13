@@ -16,7 +16,8 @@ ui_web/node_modules/
 ui_web/dist/
 ui_web/.vite/
 rust_core/target/
-config/*.local.json
+*.local
+*.local.*
 .env
 .env.*
 !.env.example

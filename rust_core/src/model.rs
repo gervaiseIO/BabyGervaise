@@ -61,8 +61,8 @@ impl OpenAiCompatibleModel {
         }
 
         if let Some(reasoning) = &self.config.reasoning {
-            body["reasoning"] = serde_json::to_value(reasoning)
-                .expect("reasoning config should always serialize");
+            body["reasoning"] =
+                serde_json::to_value(reasoning).expect("reasoning config should always serialize");
         }
 
         if self.config.stream && self.config.provider.eq_ignore_ascii_case("openai") {
@@ -164,7 +164,8 @@ mod tests {
         });
 
         assert_eq!(
-            body.pointer("/stream_options/include_usage").and_then(Value::as_bool),
+            body.pointer("/stream_options/include_usage")
+                .and_then(Value::as_bool),
             Some(true),
         );
     }

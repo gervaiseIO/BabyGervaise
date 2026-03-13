@@ -171,6 +171,12 @@ sealed interface CoreEvent {
         val status: String,
     ) : CoreEvent
 
+    data class OpenExternalUrl(
+        val turnId: String,
+        val url: String,
+        val purpose: String,
+    ) : CoreEvent
+
     data class AssistantError(
         val turnId: String?,
         val error: String,

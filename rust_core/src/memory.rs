@@ -105,7 +105,8 @@ impl MemoryStore {
                 action TEXT NOT NULL,
                 arguments_json TEXT NOT NULL,
                 result_json TEXT NOT NULL,
-                success INTEGER NOT NULL
+                success INTEGER NOT NULL,
+                latency_ms INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS retrieval_logs (
@@ -131,7 +132,19 @@ impl MemoryStore {
             "#,
         )
         .context("failed to create SQLite schema")?;
+        self.ensure_tool_log_latency_column(&conn)?;
         Ok(())
+    }
+
+    fn ensure_tool_log_latency_column(&self, conn: &Connection) -> Result<()> {
+        match conn.execute(
+            "ALTER TABLE tool_logs ADD COLUMN latency_ms INTEGER NOT NULL DEFAULT 0",
+            [],
+        ) {
+            Ok(_) => Ok(()),
+            Err(error) if error.to_string().contains("duplicate column name") => Ok(()),
+            Err(error) => Err(error).context("failed to migrate tool_logs.latency_ms"),
+        }
     }
 
     pub fn ensure_previous_context(&self, level: ContextLevel) -> Result<()> {
@@ -401,8 +414,10 @@ impl MemoryStore {
         let conn = self.connection()?;
         conn.execute(
             r#"
-            INSERT INTO tool_logs (created_at, tool_name, action, arguments_json, result_json, success)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO tool_logs (
+                created_at, tool_name, action, arguments_json, result_json, success, latency_ms
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             "#,
             params![
                 entry.created_at,
@@ -410,7 +425,8 @@ impl MemoryStore {
                 entry.action,
                 entry.arguments_json,
                 entry.result_json,
-                entry.success as i64
+                entry.success as i64,
+                entry.latency_ms
             ],
         )?;
         Ok(())

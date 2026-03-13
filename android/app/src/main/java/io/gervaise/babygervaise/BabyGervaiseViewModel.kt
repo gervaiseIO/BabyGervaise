@@ -1,6 +1,8 @@
 package io.gervaise.babygervaise
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.gervaise.babygervaise.bridge.BootstrapState
@@ -23,6 +25,8 @@ class BabyGervaiseViewModel(
 ) : AndroidViewModel(application) {
     private val bridge = NativeCoreBridge()
     private val _uiState = MutableStateFlow(BabyGervaiseUiState())
+    private var pendingSpotifyCallbackUrl: String? = null
+    private var lastHandledSpotifyCallbackUrl: String? = null
     val uiState: StateFlow<BabyGervaiseUiState> = _uiState.asStateFlow()
 
     init {
@@ -52,6 +56,10 @@ class BabyGervaiseViewModel(
 
     fun submitDraft() {
         val snapshot = _uiState.value
+        if (!snapshot.isCoreReady) {
+            showSnackbar(snapshot.initializationError ?: "Baby Gervaise is not ready yet.")
+            return
+        }
         val text = snapshot.draft.trim()
         if (text.isEmpty() || snapshot.isPending) {
             return
@@ -90,6 +98,10 @@ class BabyGervaiseViewModel(
     }
 
     fun updatePreviousContext(level: ContextLevel) {
+        if (!_uiState.value.isCoreReady) {
+            showSnackbar(_uiState.value.initializationError ?: "Baby Gervaise is not ready yet.")
+            return
+        }
         _uiState.update { current ->
             current.copy(
                 bootstrapState = current.bootstrapState.copy(previousContext = level),
@@ -115,6 +127,17 @@ class BabyGervaiseViewModel(
         }
     }
 
+    fun handleSpotifyAuthRedirect(callbackUrl: String) {
+        if (callbackUrl == lastHandledSpotifyCallbackUrl) {
+            return
+        }
+        if (!_uiState.value.isCoreReady) {
+            pendingSpotifyCallbackUrl = callbackUrl
+            return
+        }
+        completeSpotifyAuth(callbackUrl)
+    }
+
     private fun observeCoreEvents() {
         viewModelScope.launch {
             bridge.events.collect(::handleCoreEvent)
@@ -137,11 +160,20 @@ class BabyGervaiseViewModel(
                         bootstrapState = bootstrap,
                         overviewSnapshot = overview,
                         isInitializing = false,
+                        initializationError = null,
+                        isCoreReady = true,
+                        toolStatus = "HGIE ready.",
                     )
                 }
+                processPendingSpotifyCallback()
             }.onFailure { error ->
                 _uiState.update { current ->
-                    current.copy(isInitializing = false)
+                    current.copy(
+                        isInitializing = false,
+                        initializationError = error.message ?: "Failed to initialize Baby Gervaise core.",
+                        isCoreReady = false,
+                        toolStatus = "Initialization failed.",
+                    )
                 }
                 showSnackbar(error.message ?: "Failed to initialize Baby Gervaise core.")
             }
@@ -238,6 +270,10 @@ class BabyGervaiseViewModel(
                 }
             }
 
+            is CoreEvent.OpenExternalUrl -> {
+                launchExternalUrl(event.url)
+            }
+
             is CoreEvent.AssistantError -> {
                 _uiState.update { current ->
                     current.copy(
@@ -272,6 +308,51 @@ class BabyGervaiseViewModel(
     private fun showSnackbar(message: String) {
         _uiState.update { current ->
             current.copy(snackbarMessage = message)
+        }
+    }
+
+    private fun processPendingSpotifyCallback() {
+        val callbackUrl = pendingSpotifyCallbackUrl ?: return
+        pendingSpotifyCallbackUrl = null
+        handleSpotifyAuthRedirect(callbackUrl)
+    }
+
+    private fun completeSpotifyAuth(callbackUrl: String) {
+        if (callbackUrl == lastHandledSpotifyCallbackUrl) {
+            return
+        }
+        lastHandledSpotifyCallbackUrl = callbackUrl
+        val turnId = "spotify-auth-${UUID.randomUUID()}"
+        _uiState.update { current ->
+            current.copy(
+                pendingTurnId = turnId,
+                toolStatus = "Completing Spotify sign-in...",
+            )
+        }
+        viewModelScope.launch {
+            runCatching {
+                bridge.handleSpotifyAuthCallback(turnId, callbackUrl)
+            }.onFailure { error ->
+                _uiState.update { current ->
+                    current.copy(
+                        pendingTurnId = null,
+                        toolStatus = error.message ?: "Spotify authentication failed.",
+                    )
+                }
+                showSnackbar(error.message ?: "Spotify authentication failed.")
+            }
+        }
+    }
+
+    private fun launchExternalUrl(url: String) {
+        val application = getApplication<Application>()
+        runCatching {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            application.startActivity(intent)
+        }.onFailure { error ->
+            showSnackbar(error.message ?: "Failed to open browser.")
         }
     }
 

@@ -18,6 +18,7 @@ use time::OffsetDateTime;
 
 use crate::logging::OverviewSnapshot;
 use crate::memory::MemoryStore;
+use crate::tools::ToolExecutor;
 
 #[cfg(target_os = "android")]
 use anyhow::anyhow;
@@ -172,6 +173,7 @@ impl BabyGervaiseCore {
             Arc::new(OpenAiCompatibleModel::new(model_config.clone())?) as Arc<dyn ModelGateway>;
         Self::with_model_gateway(
             app_files_dir,
+            asset_config_dir,
             callbacks,
             model_config,
             prompt_config,
@@ -182,6 +184,7 @@ impl BabyGervaiseCore {
 
     pub fn with_model_gateway(
         app_files_dir: impl AsRef<Path>,
+        asset_config_dir: impl AsRef<Path>,
         callbacks: Arc<dyn CoreCallbacks>,
         model_config: ModelConfig,
         prompt_config: PromptConfig,
@@ -190,8 +193,14 @@ impl BabyGervaiseCore {
     ) -> Result<Self> {
         let db_path = app_files_dir.as_ref().join("baby_gervaise.sqlite3");
         let memory = MemoryStore::new(db_path, &app_config)?;
+        let tools = ToolExecutor::with_spotify(
+            memory.clone(),
+            app_files_dir.as_ref(),
+            asset_config_dir.as_ref(),
+        );
         let engine = HgieEngine::new(
             memory.clone(),
+            tools,
             model.clone(),
             model_config,
             prompt_config,
@@ -215,6 +224,15 @@ impl BabyGervaiseCore {
     ) -> Result<()> {
         self.engine
             .execute_turn(turn_id, text, input_source, self.callbacks.as_ref())?;
+        Ok(())
+    }
+
+    pub fn handle_spotify_auth_callback(&self, turn_id: &str, callback_url: &str) -> Result<()> {
+        self.engine.complete_spotify_auth_callback(
+            turn_id,
+            callback_url,
+            self.callbacks.as_ref(),
+        )?;
         Ok(())
     }
 
@@ -242,7 +260,7 @@ pub fn now_rfc3339() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned())
 }
 
-fn load_config<T: DeserializeOwned>(config_dir: &Path, base_name: &str) -> Result<T> {
+pub(crate) fn load_config<T: DeserializeOwned>(config_dir: &Path, base_name: &str) -> Result<T> {
     let base_path = config_dir.join(base_name);
     let local_path = config_dir.join(base_name.replace(".json", ".local.json"));
     let base_value = read_json_file(&base_path)?;
@@ -378,6 +396,24 @@ mod android_bridge {
             let text = read_string(&mut env, text)?;
             let input_source = InputSource::from_str(&read_string(&mut env, input_source)?);
             with_core_mut(|core| core.submit_user_turn(&turn_id, &text, input_source))
+        })();
+
+        if let Err(error) = result {
+            throw_error(&mut env, error);
+        }
+    }
+
+    #[no_mangle]
+    pub extern "system" fn Java_io_gervaise_babygervaise_bridge_NativeBabyGervaise_nativeHandleSpotifyAuthCallback(
+        mut env: JNIEnv,
+        _class: JClass,
+        turn_id: JString,
+        callback_url: JString,
+    ) {
+        let result = (|| {
+            let turn_id = read_string(&mut env, turn_id)?;
+            let callback_url = read_string(&mut env, callback_url)?;
+            with_core_mut(|core| core.handle_spotify_auth_callback(&turn_id, &callback_url))
         })();
 
         if let Err(error) = result {

@@ -52,6 +52,15 @@ object CoreJson {
                 )
             }
 
+            "open_external_url" -> {
+                val payload = json.decodeFromString<OpenExternalUrlPayload>(payloadJson)
+                CoreEvent.OpenExternalUrl(
+                    turnId = payload.turnId,
+                    url = payload.url,
+                    purpose = payload.purpose,
+                )
+            }
+
             "assistant_error" -> {
                 val payload = json.decodeFromString<AssistantErrorPayload>(payloadJson)
                 CoreEvent.AssistantError(turnId = payload.turnId, error = payload.error)
@@ -92,6 +101,14 @@ object CoreJson {
         val tool: String,
         val action: String,
         val status: String,
+    )
+
+    @Serializable
+    private data class OpenExternalUrlPayload(
+        @SerialName("turnId")
+        val turnId: String,
+        val url: String,
+        val purpose: String,
     )
 
     @Serializable

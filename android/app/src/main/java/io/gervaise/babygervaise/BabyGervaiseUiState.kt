@@ -18,12 +18,14 @@ data class BabyGervaiseUiState(
     val toolStatus: String? = null,
     val snackbarMessage: String? = null,
     val isInitializing: Boolean = true,
+    val initializationError: String? = null,
+    val isCoreReady: Boolean = false,
 ) {
     val isPending: Boolean
         get() = pendingTurnId != null
 
     val statusText: String
-        get() = toolStatus ?: "HGIE ready."
+        get() = initializationError ?: toolStatus ?: "HGIE ready."
 }
 
 fun ContextLevel.asStatusLabel(): String = wireName

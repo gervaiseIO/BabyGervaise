@@ -1,21 +1,48 @@
+mod spotify;
+
+use std::path::Path;
+
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::memory::MemoryStore;
 use crate::now_rfc3339;
+use spotify::{SpotifyAdapter, SpotifyOutcome};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ToolName {
     Spotify,
     Hue,
 }
 
+impl ToolName {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Spotify => "spotify",
+            Self::Hue => "hue",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "spotify" => Ok(Self::Spotify),
+            "hue" => Ok(Self::Hue),
+            other => Err(anyhow!("unsupported tool: {other}")),
+        }
+    }
+}
+
+fn default_tool_arguments() -> Value {
+    Value::Object(Map::new())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolRequest {
     pub tool: ToolName,
     pub action: String,
+    #[serde(default = "default_tool_arguments")]
     pub arguments: Value,
 }
 
@@ -28,11 +55,30 @@ pub struct ToolExecutionResult {
     pub result_json: Value,
 }
 
+impl ToolExecutionResult {
+    pub fn is_success(&self) -> bool {
+        self.result_json
+            .get("status")
+            .and_then(Value::as_str)
+            .map(|status| status != "error")
+            .unwrap_or(true)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct SpotifyState {
+    auth_connected: bool,
+    auth_in_progress: bool,
+    pending_auth_state: Option<String>,
     is_playing: bool,
     last_query: Option<String>,
-    volume: u8,
+    volume_percent: Option<u8>,
+    track: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    device_name: Option<String>,
+    last_action: Option<String>,
+    last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -46,11 +92,40 @@ struct HueState {
 #[derive(Clone)]
 pub struct ToolExecutor {
     memory: MemoryStore,
+    spotify: Option<SpotifyAdapter>,
 }
 
 impl ToolExecutor {
     pub fn new(memory: MemoryStore) -> Self {
-        Self { memory }
+        Self {
+            memory,
+            spotify: None,
+        }
+    }
+
+    pub fn with_spotify(memory: MemoryStore, app_files_dir: &Path, config_dir: &Path) -> Self {
+        let spotify = match SpotifyAdapter::new(app_files_dir, config_dir) {
+            Ok(adapter) => Some(adapter),
+            Err(error) => {
+                eprintln!("spotify adapter disabled: {error}");
+                None
+            }
+        };
+
+        Self { memory, spotify }
+    }
+
+    pub fn execute_named(
+        &self,
+        tool: &str,
+        action: &str,
+        arguments: Value,
+    ) -> Result<ToolExecutionResult> {
+        self.execute(&ToolRequest {
+            tool: ToolName::parse(tool)?,
+            action: action.to_owned(),
+            arguments,
+        })
     }
 
     pub fn execute(&self, request: &ToolRequest) -> Result<ToolExecutionResult> {
@@ -61,75 +136,23 @@ impl ToolExecutor {
     }
 
     fn execute_spotify(&self, request: &ToolRequest) -> Result<ToolExecutionResult> {
-        let mut state: SpotifyState = self
+        let state: SpotifyState = self
             .memory
             .get_tool_state("spotify")?
             .map(serde_json::from_value)
             .transpose()?
-            .unwrap_or(SpotifyState {
-                is_playing: false,
-                last_query: None,
-                volume: 50,
-            });
+            .unwrap_or_default();
 
-        let result_json = match request.action.as_str() {
-            "play" => {
-                let query = request
-                    .arguments
-                    .get("query")
-                    .and_then(Value::as_str)
-                    .map(ToOwned::to_owned);
-                if query.is_some() {
-                    state.last_query = query.clone();
-                }
-                state.is_playing = true;
-                json!({
-                    "status": "ok",
-                    "query": query,
-                    "message": "Spotify playback started."
-                })
-            }
-            "pause" => {
-                state.is_playing = false;
-                json!({
-                    "status": "ok",
-                    "message": "Spotify playback paused."
-                })
-            }
-            "search" => {
-                let query = request
-                    .arguments
-                    .get("query")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| anyhow!("spotify.search requires a query"))?;
-                state.last_query = Some(query.to_owned());
-                json!({
-                    "status": "ok",
-                    "query": query,
-                    "results": [
-                        { "title": format!("{query} — Demo Track"), "artist": "Baby Gervaise" },
-                        { "title": format!("{query} — Live Version"), "artist": "Baby Gervaise" }
-                    ]
-                })
-            }
-            "set_volume" => {
-                let level = request
-                    .arguments
-                    .get("level")
-                    .and_then(Value::as_u64)
-                    .ok_or_else(|| anyhow!("spotify.set_volume requires a numeric level"))?;
-                let level = level.min(100) as u8;
-                state.volume = level;
-                json!({
-                    "status": "ok",
-                    "level": level,
-                    "message": format!("Spotify volume set to {level}.")
-                })
-            }
-            action => return Err(anyhow!("unsupported Spotify action: {action}")),
+        let outcome = match &self.spotify {
+            Some(adapter) => adapter.execute(&request.action, &request.arguments, &state),
+            None => SpotifyOutcome::error(
+                &request.action,
+                state.clone(),
+                "Spotify is not configured for this runtime",
+            ),
         };
 
-        let state_json = serde_json::to_value(&state)?;
+        let state_json = serde_json::to_value(&outcome.state)?;
         self.memory
             .set_tool_state("spotify", &state_json, &now_rfc3339())
             .context("failed to persist spotify state")?;
@@ -137,13 +160,9 @@ impl ToolExecutor {
         Ok(ToolExecutionResult {
             tool: ToolName::Spotify,
             action: request.action.clone(),
-            summary: result_json
-                .get("message")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-                .unwrap_or_else(|| "Spotify action completed.".to_owned()),
+            summary: outcome.summary,
             state_json,
-            result_json,
+            result_json: outcome.result_json,
         })
     }
 
@@ -169,7 +188,7 @@ impl ToolExecutor {
                     .ok_or_else(|| anyhow!("hue.set_power requires a boolean on"))?;
                 state.power = on;
                 json!({
-                    "status": "ok",
+                    "status": "success",
                     "on": on,
                     "message": if on { "Hue lights turned on." } else { "Hue lights turned off." }
                 })
@@ -183,7 +202,7 @@ impl ToolExecutor {
                 let level = level.min(100) as u8;
                 state.brightness = level;
                 json!({
-                    "status": "ok",
+                    "status": "success",
                     "level": level,
                     "message": format!("Hue brightness set to {level}.")
                 })
@@ -196,7 +215,7 @@ impl ToolExecutor {
                     .ok_or_else(|| anyhow!("hue.set_color requires a color"))?;
                 state.color = color.to_owned();
                 json!({
-                    "status": "ok",
+                    "status": "success",
                     "color": color,
                     "message": format!("Hue color changed to {color}.")
                 })
@@ -209,7 +228,7 @@ impl ToolExecutor {
                     .ok_or_else(|| anyhow!("hue.activate_scene requires a scene"))?;
                 state.last_scene = Some(scene.to_owned());
                 json!({
-                    "status": "ok",
+                    "status": "success",
                     "scene": scene,
                     "message": format!("Hue scene {scene} activated.")
                 })

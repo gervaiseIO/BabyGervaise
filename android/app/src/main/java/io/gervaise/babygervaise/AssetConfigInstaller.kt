@@ -14,6 +14,8 @@ class AssetConfigInstaller(private val context: Context) {
             "prompt_config.local.json",
             "app_config.json",
             "app_config.local.json",
+            "spotify_config.json",
+            "spotify_config.local.json",
         )
             .filter { fileName -> fileName in availableAssets }
             .forEach { fileName ->

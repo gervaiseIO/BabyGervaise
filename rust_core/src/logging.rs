@@ -24,6 +24,7 @@ pub struct ToolLogEntry {
     pub arguments_json: String,
     pub result_json: String,
     pub success: bool,
+    pub latency_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

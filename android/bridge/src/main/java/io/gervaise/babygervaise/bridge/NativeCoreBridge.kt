@@ -56,10 +56,12 @@ class NativeCoreBridge(
     }
 
     suspend fun loadBootstrapState(): BootstrapState = withContext(dispatcher) {
+        requireInitialized()
         CoreJson.decodeBootstrapState(nativeCore.loadBootstrapState())
     }
 
     suspend fun loadOverviewSnapshot(): OverviewSnapshot = withContext(dispatcher) {
+        requireInitialized()
         CoreJson.decodeOverviewSnapshot(nativeCore.loadOverviewState())
     }
 
@@ -69,6 +71,7 @@ class NativeCoreBridge(
         inputSource: InputSource = InputSource.TEXT,
     ) {
         withContext(dispatcher) {
+            requireInitialized()
             nativeCore.submitUserTurn(
                 turnId = turnId,
                 text = text,
@@ -77,8 +80,19 @@ class NativeCoreBridge(
         }
     }
 
+    suspend fun handleSpotifyAuthCallback(
+        turnId: String,
+        callbackUrl: String,
+    ) {
+        withContext(dispatcher) {
+            requireInitialized()
+            nativeCore.handleSpotifyAuthCallback(turnId, callbackUrl)
+        }
+    }
+
     suspend fun setPreviousContext(level: ContextLevel) {
         withContext(dispatcher) {
+            requireInitialized()
             nativeCore.setPreviousContext(level.wireName)
         }
         eventsFlow.emit(CoreEvent.ConfigUpdated(level))
@@ -86,5 +100,11 @@ class NativeCoreBridge(
 
     override fun close() {
         dispatcher.close()
+    }
+
+    private fun requireInitialized() {
+        check(isInitialized) {
+            "Baby Gervaise core is not initialized."
+        }
     }
 }

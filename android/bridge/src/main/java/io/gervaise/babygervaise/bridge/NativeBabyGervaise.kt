@@ -21,6 +21,11 @@ class NativeBabyGervaise {
         inputSource: String,
     )
 
+    private external fun nativeHandleSpotifyAuthCallback(
+        turnId: String,
+        callbackUrl: String,
+    )
+
     private external fun nativeLoadBootstrapState(): String
 
     private external fun nativeLoadOverviewState(): String
@@ -45,6 +50,14 @@ class NativeBabyGervaise {
         nativeSubmitUserTurn(turnId, text, inputSource)
     }
 
+    fun handleSpotifyAuthCallback(
+        turnId: String,
+        callbackUrl: String,
+    ) {
+        requireLoaded()
+        nativeHandleSpotifyAuthCallback(turnId, callbackUrl)
+    }
+
     fun loadBootstrapState(): String {
         requireLoaded()
         return nativeLoadBootstrapState()
@@ -66,4 +79,3 @@ class NativeBabyGervaise {
         }
     }
 }
-
