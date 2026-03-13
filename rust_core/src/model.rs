@@ -52,10 +52,18 @@ impl OpenAiCompatibleModel {
     fn request_body(&self, request: &ModelRequest) -> Value {
         let mut body = json!({
             "model": self.config.model,
-            "temperature": self.config.temperature,
             "stream": self.config.stream,
             "messages": request.messages,
         });
+
+        if let Some(temperature) = self.config.temperature {
+            body["temperature"] = json!(temperature);
+        }
+
+        if let Some(reasoning) = &self.config.reasoning {
+            body["reasoning"] = serde_json::to_value(reasoning)
+                .expect("reasoning config should always serialize");
+        }
 
         if self.config.stream && self.config.provider.eq_ignore_ascii_case("openai") {
             body["stream_options"] = json!({
@@ -136,9 +144,10 @@ mod tests {
                 api_key: "test-key".to_owned(),
                 model: "gpt-4o-mini".to_owned(),
                 endpoint: "https://api.openai.com/v1/chat/completions".to_owned(),
-                temperature: 0.3,
+                temperature: Some(0.3),
                 timeout_ms: 1_000,
                 stream,
+                reasoning: None,
             },
             client: Client::builder().build().unwrap(),
         }
@@ -171,6 +180,41 @@ mod tests {
         });
 
         assert!(body.get("stream_options").is_none());
+    }
+
+    #[test]
+    fn request_body_omits_temperature_when_unset() {
+        let mut model = test_model(true);
+        model.config.temperature = None;
+
+        let body = model.request_body(&ModelRequest {
+            messages: vec![ModelMessage {
+                role: "user".to_owned(),
+                content: "Hello".to_owned(),
+            }],
+        });
+
+        assert!(body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn request_body_includes_reasoning_when_configured() {
+        let mut model = test_model(true);
+        model.config.reasoning = Some(crate::ModelReasoningConfig {
+            effort: "medium".to_owned(),
+        });
+
+        let body = model.request_body(&ModelRequest {
+            messages: vec![ModelMessage {
+                role: "user".to_owned(),
+                content: "Hello".to_owned(),
+            }],
+        });
+
+        assert_eq!(
+            body.pointer("/reasoning/effort").and_then(Value::as_str),
+            Some("medium"),
+        );
     }
 }
 

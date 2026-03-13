@@ -53,9 +53,10 @@ fn test_configs() -> (ModelConfig, PromptConfig, AppConfig) {
             api_key: "test".to_owned(),
             model: "test-model".to_owned(),
             endpoint: "https://example.invalid".to_owned(),
-            temperature: 0.3,
+            temperature: Some(0.3),
             timeout_ms: 1000,
             stream: true,
+            reasoning: None,
         },
         PromptConfig {
             system_prompt: "Stay continuous.".to_owned(),
@@ -155,7 +156,6 @@ fn config_merge_prefers_local_override() -> Result<()> {
             "api_key":"YOUR_KEY",
             "model":"gpt-4o-mini",
             "endpoint":"https://api.openai.com/v1/chat/completions",
-            "temperature":0.3,
             "timeout_ms":1000,
             "stream":true
         }"#,

@@ -78,7 +78,7 @@ Those will belong to later Gervaise phases.
 
 ```text
 Android App
-├── Web UI Shell
+├── Compose UI
 ├── Android Integration Layer
 └── Rust Bridge
     └── Baby Gervaise Core
@@ -128,7 +128,7 @@ Responsibilities:
 - application lifecycle
 - system integration
 - Android assistant entry experiments
-- hosting the web-based UI shell
+- hosting the Compose-native UI
 - bridging Kotlin ↔ Rust
 - local app settings
 - future voice input handling
@@ -137,9 +137,9 @@ The Android app is the shell and host environment.
 
 ---
 
-### 5.2 Web-Based UI Shell
+### 5.2 Compose-Native UI
 
-The visual UI is implemented as a lightweight web-based shell embedded inside the Android app.
+The visual UI is implemented as a Jetpack Compose + Material 3 surface inside the Android app.
 
 Responsibilities:
 
@@ -582,9 +582,6 @@ baby-gervaise/
 ├── android/
 │   ├── app/
 │   └── bridge/
-├── ui_web/
-│   ├── src/
-│   └── assets/
 ├── rust_core/
 │   ├── src/
 │   │   ├── hgie.rs

@@ -1,4 +1,3 @@
-import org.gradle.api.tasks.Exec
 import java.io.File
 
 plugins {
@@ -12,7 +11,6 @@ val androidSdkRoot = System.getenv("ANDROID_SDK_ROOT")
     ?: System.getenv("ANDROID_HOME")
     ?: "$userHome/Library/Android/sdk"
 val workspaceRoot = rootProject.projectDir.resolve("..").canonicalFile
-val uiWebDir = workspaceRoot.resolve("ui_web")
 val rustCoreDir = workspaceRoot.resolve("rust_core")
 val scriptsDir = workspaceRoot.resolve("scripts")
 val generatedRustJniLibs = layout.buildDirectory.dir("generated/rustJniLibs")
@@ -23,17 +21,8 @@ val rustupPathPrefix = listOf(
     "${System.getProperty("user.home")}/.cargo/bin",
 ).filter { candidate -> File(candidate).exists() }
     .joinToString(separator = ":")
-val npmExecutable = listOfNotNull(
-    System.getenv("NPM_BIN"),
-    "/opt/homebrew/bin/npm",
-    "/usr/local/bin/npm",
-).firstOrNull { candidate -> File(candidate).exists() } ?: "npm"
-val nodePathPrefix = listOf("/opt/homebrew/bin", "/usr/local/bin")
-    .filter { candidate -> File(candidate).exists() }
-    .joinToString(separator = ":")
 val gradleExecPath = listOfNotNull(
     rustupPathPrefix.takeIf { it.isNotBlank() },
-    nodePathPrefix.takeIf { it.isNotBlank() },
     System.getenv("PATH"),
 ).joinToString(separator = ":")
 
@@ -91,35 +80,6 @@ android {
     sourceSets["main"].jniLibs.srcDir(generatedRustJniLibs)
 }
 
-val npmInstall by tasks.registering(Exec::class) {
-    workingDir = uiWebDir
-    commandLine(npmExecutable, "install")
-    environment("PATH", gradleExecPath)
-    environment("HOME", userHome)
-    inputs.files(
-        uiWebDir.resolve("package.json"),
-        uiWebDir.resolve("package-lock.json"),
-    )
-    outputs.dir(uiWebDir.resolve("node_modules"))
-}
-
-val buildWebUi by tasks.registering(Exec::class) {
-    workingDir = uiWebDir
-    commandLine(npmExecutable, "run", "build")
-    dependsOn(npmInstall)
-    environment("PATH", gradleExecPath)
-    environment("HOME", userHome)
-    inputs.files(
-        uiWebDir.resolve("index.html"),
-        uiWebDir.resolve("package.json"),
-        uiWebDir.resolve("package-lock.json"),
-        uiWebDir.resolve("tsconfig.json"),
-        uiWebDir.resolve("vite.config.ts"),
-    )
-    inputs.dir(uiWebDir.resolve("src"))
-    outputs.dir(projectDir.resolve("src/main/assets/ui"))
-}
-
 fun registerRustTask(name: String, profile: String) = tasks.register(name, Exec::class.java) {
     workingDir = workspaceRoot
     commandLine(
@@ -156,23 +116,25 @@ tasks.matching { it.name == "preReleaseBuild" }.configureEach {
     dependsOn(buildRustAndroidRelease)
 }
 
-tasks.named("preBuild").configure {
-    dependsOn(buildWebUi)
-}
-
 dependencies {
     implementation(project(":bridge"))
 
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
     implementation("androidx.activity:activity-compose:1.9.0")
-    implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.webkit:webkit:1.11.0")
+    implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.2")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.2")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.06.00"))

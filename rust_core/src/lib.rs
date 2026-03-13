@@ -98,15 +98,23 @@ pub struct BootstrapState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelReasoningConfig {
+    pub effort: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub provider: String,
     pub api_key: String,
     pub model: String,
     pub endpoint: String,
-    pub temperature: f32,
+    #[serde(default)]
+    pub temperature: Option<f32>,
     pub timeout_ms: u64,
     #[serde(default = "default_stream_enabled")]
     pub stream: bool,
+    #[serde(default)]
+    pub reasoning: Option<ModelReasoningConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

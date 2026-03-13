@@ -198,7 +198,7 @@ Android
 Technology stack:
 
 -   Kotlin Android application
--   Web-based UI shell
+-   Jetpack Compose native UI
 -   Rust core library (Baby Gervaise Core)
 
 Rust provides a portable core foundation for future platforms.

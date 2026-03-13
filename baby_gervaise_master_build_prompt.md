@@ -337,7 +337,6 @@ Data must survive application restarts.
 Generate the following structure:
 
 /android\
-/ui_web\
 /rust_core\
 /config
 
