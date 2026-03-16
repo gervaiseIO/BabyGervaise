@@ -182,7 +182,7 @@ This is essential for HGIE experimentation.
 
 # Configuration System
 
-Model provider must be configured through a build‑time config file.
+Model runtime must be configured through a build‑time config file.
 
 Example:
 
@@ -190,16 +190,28 @@ config/model_config.json
 
 Example structure:
 
-{ "provider": "openai", "api_key": "YOUR_KEY", "model": "gpt-4o-mini",
-"endpoint": "https://api.openai.com/v1", "temperature": 0.7 }
+{
+  "nano": {
+    "enabled": true,
+    "provider": "gemini",
+    "model": "gemini-nano"
+  },
+  "cloud": {
+    "selected_profile": "openai_mini",
+    "profiles": {
+      "openai_mini": {
+        "provider": "openai",
+        "model": "gpt-5-mini"
+      }
+    }
+  }
+}
 
-Baby Gervaise uses **ONE model only**.
+Baby Gervaise still exposes **one continuous Gervaise**.
 
-No routing.
+Internally Nano is always first.
 
-No fast/deep models.
-
-Just one conversational model.
+Cloud follow-up is optional and remains hidden from the main chat UI.
 
 ------------------------------------------------------------------------
 

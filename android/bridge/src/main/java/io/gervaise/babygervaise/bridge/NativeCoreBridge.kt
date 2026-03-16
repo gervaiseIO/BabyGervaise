@@ -1,5 +1,6 @@
 package io.gervaise.babygervaise.bridge
 
+import android.util.Log
 import java.io.Closeable
 import java.util.concurrent.Executors
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
@@ -12,7 +13,12 @@ import kotlinx.coroutines.withContext
 
 class NativeCoreBridge(
     private val nativeCore: NativeBabyGervaise = NativeBabyGervaise(),
+    private val nanoHost: NanoHost,
 ) : Closeable {
+    companion object {
+        private const val TAG = "BGBridge"
+    }
+
     private val dispatcher: ExecutorCoroutineDispatcher =
         Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val initializeMutex = Mutex()
@@ -45,10 +51,12 @@ class NativeCoreBridge(
             }
 
             withContext(dispatcher) {
+                Log.i(TAG, "initialize core")
                 nativeCore.init(
                     appFilesDir = appFilesDir,
                     assetConfigDir = assetConfigDir,
                     callbacks = callbacks,
+                    nanoHost = nanoHost,
                 )
             }
             isInitialized = true
@@ -72,6 +80,7 @@ class NativeCoreBridge(
     ) {
         withContext(dispatcher) {
             requireInitialized()
+            Log.i(TAG, "submit turnId=$turnId source=${inputSource.name.lowercase()}")
             nativeCore.submitUserTurn(
                 turnId = turnId,
                 text = text,
@@ -90,12 +99,88 @@ class NativeCoreBridge(
         }
     }
 
+    suspend fun handleToolAuthCallback(
+        tool: String,
+        turnId: String,
+        callbackUrl: String,
+    ) {
+        withContext(dispatcher) {
+            requireInitialized()
+            Log.i(TAG, "handle auth callback tool=$tool turnId=$turnId")
+            nativeCore.handleToolAuthCallback(tool, turnId, callbackUrl)
+        }
+    }
+
+    suspend fun executeToolAction(
+        tool: String,
+        action: String,
+        argumentsJson: String = "{}",
+    ): ToolExecutionResult = withContext(dispatcher) {
+        requireInitialized()
+        CoreJson.decodeToolExecutionResult(
+            nativeCore.executeToolAction(
+                tool = tool,
+                action = action,
+                argumentsJson = argumentsJson,
+            ),
+        )
+    }
+
+    suspend fun beginToolAuth(tool: String): ToolExecutionResult = withContext(dispatcher) {
+        requireInitialized()
+        Log.i(TAG, "begin tool auth tool=$tool")
+        CoreJson.decodeToolExecutionResult(nativeCore.beginToolAuth(tool))
+    }
+
+    suspend fun disconnectTool(tool: String): ToolExecutionResult = withContext(dispatcher) {
+        requireInitialized()
+        Log.i(TAG, "disconnect tool=$tool")
+        CoreJson.decodeToolExecutionResult(nativeCore.disconnectTool(tool))
+    }
+
+    suspend fun refreshToolState(tool: String): ToolExecutionResult = withContext(dispatcher) {
+        requireInitialized()
+        Log.i(TAG, "refresh tool tool=$tool")
+        CoreJson.decodeToolExecutionResult(nativeCore.refreshToolState(tool))
+    }
+
     suspend fun setPreviousContext(level: ContextLevel) {
         withContext(dispatcher) {
             requireInitialized()
             nativeCore.setPreviousContext(level.wireName)
         }
         eventsFlow.emit(CoreEvent.ConfigUpdated(level))
+    }
+
+    suspend fun setCloudProfile(profileId: String) {
+        withContext(dispatcher) {
+            requireInitialized()
+            nativeCore.setCloudProfile(profileId)
+        }
+    }
+
+    suspend fun submitAmbientEvent(
+        turnId: String,
+        eventType: String,
+        payloadJson: String = "{}",
+    ) {
+        withContext(dispatcher) {
+            requireInitialized()
+            nativeCore.submitAmbientEvent(turnId, eventType, payloadJson)
+        }
+    }
+
+    suspend fun recordNoteActivity(event: NoteActivityEvent) {
+        withContext(dispatcher) {
+            requireInitialized()
+            nativeCore.recordNoteActivity(
+                noteKey = event.noteKey,
+                relativePath = event.relativePath,
+                titleSnapshot = event.titleSnapshot,
+                eventType = event.eventType,
+                occurredAt = event.occurredAt,
+            )
+        }
     }
 
     override fun close() {

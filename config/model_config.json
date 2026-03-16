@@ -1,8 +1,58 @@
 {
-  "provider": "openai",
-  "api_key": "YOUR_KEY",
-  "model": "gpt-5-mini",
-  "endpoint": "https://api.openai.com/v1/chat/completions",
-  "timeout_ms": 45000,
-  "stream": true
+  "nano": {
+    "enabled": true,
+    "provider": "gemini",
+    "model": "gemini-nano",
+    "temperature": 0.4,
+    "max_output_tokens": 48
+  },
+  "cloud": {
+    "selected_profile": "openai_mini",
+    "profiles": {
+      "gemini_flash_lite": {
+        "label": "Gemini Flash Lite",
+        "provider": "gemini",
+        "model": "gemini-2.5-flash-lite",
+        "endpoint": "",
+        "api_key": "YOUR_GEMINI_KEY",
+        "temperature": 0.7,
+        "timeout_ms": 45000,
+        "enabled": true
+      },
+      "gemini_flash": {
+        "label": "Gemini Flash",
+        "provider": "gemini",
+        "model": "gemini-2.5-flash",
+        "endpoint": "",
+        "api_key": "YOUR_GEMINI_KEY",
+        "temperature": 0.7,
+        "timeout_ms": 45000,
+        "enabled": true
+      },
+      "gemini_pro": {
+        "label": "Gemini Pro",
+        "provider": "gemini",
+        "model": "gemini-2.5-pro",
+        "endpoint": "",
+        "api_key": "YOUR_GEMINI_KEY",
+        "temperature": 0.6,
+        "timeout_ms": 60000,
+        "enabled": true
+      },
+      "openai_mini": {
+        "label": "OpenAI Mini",
+        "provider": "openai",
+        "model": "gpt-5-mini",
+        "endpoint": "https://api.openai.com/v1/chat/completions",
+        "api_key": "YOUR_OPENAI_KEY",
+        "temperature": 0.7,
+        "timeout_ms": 45000,
+        "stream": true,
+        "reasoning": {
+          "effort": "low"
+        },
+        "enabled": true
+      }
+    }
+  }
 }

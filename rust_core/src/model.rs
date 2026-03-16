@@ -56,13 +56,21 @@ impl OpenAiCompatibleModel {
             "messages": request.messages,
         });
 
-        if let Some(temperature) = self.config.temperature {
+        if let Some(temperature) = self
+            .config
+            .temperature
+            .filter(|_| self.should_send_temperature())
+        {
             body["temperature"] = json!(temperature);
         }
 
         if let Some(reasoning) = &self.config.reasoning {
-            body["reasoning"] =
-                serde_json::to_value(reasoning).expect("reasoning config should always serialize");
+            if self.uses_openai_chat_completions() {
+                body["reasoning_effort"] = json!(reasoning.effort);
+            } else {
+                body["reasoning"] = serde_json::to_value(reasoning)
+                    .expect("reasoning config should always serialize");
+            }
         }
 
         if self.config.stream && self.config.provider.eq_ignore_ascii_case("openai") {
@@ -72,6 +80,23 @@ impl OpenAiCompatibleModel {
         }
 
         body
+    }
+
+    fn uses_openai_chat_completions(&self) -> bool {
+        self.config.provider.eq_ignore_ascii_case("openai")
+            && self
+                .config
+                .endpoint
+                .to_ascii_lowercase()
+                .contains("/chat/completions")
+    }
+
+    fn is_openai_gpt5_family(&self) -> bool {
+        self.config.model.to_ascii_lowercase().starts_with("gpt-5")
+    }
+
+    fn should_send_temperature(&self) -> bool {
+        !(self.uses_openai_chat_completions() && self.is_openai_gpt5_family())
     }
 
     fn extract_message_content(&self, body: &str) -> Result<(String, Option<i64>, Option<i64>)> {
@@ -133,6 +158,74 @@ impl OpenAiCompatibleModel {
     }
 }
 
+pub struct GeminiModel {
+    config: ModelConfig,
+    client: Client,
+}
+
+impl GeminiModel {
+    pub fn new(config: ModelConfig) -> Result<Self> {
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_millis(config.timeout_ms))
+            .build()
+            .context("failed to construct HTTP client")?;
+        Ok(Self { config, client })
+    }
+
+    fn render_prompt(&self, request: &ModelRequest) -> String {
+        request
+            .messages
+            .iter()
+            .map(|message| format!("{}:\n{}", message.role.to_uppercase(), message.content))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    fn request_body(&self, request: &ModelRequest) -> Value {
+        let mut body = json!({
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": self.render_prompt(request)
+                        }
+                    ]
+                }
+            ]
+        });
+
+        if let Some(temperature) = self.config.temperature {
+            body["generationConfig"] = json!({
+                "temperature": temperature
+            });
+        }
+
+        body
+    }
+
+    fn extract_text(&self, body: &str) -> Result<(String, Option<i64>, Option<i64>)> {
+        let value: Value = serde_json::from_str(body).context("invalid Gemini response body")?;
+        let parts = value
+            .pointer("/candidates/0/content/parts")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                anyhow!("Gemini response did not include candidates[0].content.parts")
+            })?;
+        let text = parts
+            .iter()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("");
+        let input_tokens = value
+            .pointer("/usageMetadata/promptTokenCount")
+            .and_then(Value::as_i64);
+        let output_tokens = value
+            .pointer("/usageMetadata/candidatesTokenCount")
+            .and_then(Value::as_i64);
+        Ok((text, input_tokens, output_tokens))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,11 +236,13 @@ mod tests {
                 provider: "openai".to_owned(),
                 api_key: "test-key".to_owned(),
                 model: "gpt-4o-mini".to_owned(),
+                label: None,
                 endpoint: "https://api.openai.com/v1/chat/completions".to_owned(),
                 temperature: Some(0.3),
                 timeout_ms: 1_000,
                 stream,
                 reasoning: None,
+                enabled: true,
             },
             client: Client::builder().build().unwrap(),
         }
@@ -213,14 +308,71 @@ mod tests {
         });
 
         assert_eq!(
+            body.pointer("/reasoning_effort").and_then(Value::as_str),
+            Some("medium"),
+        );
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn request_body_omits_temperature_for_openai_gpt5_chat_completions() {
+        let mut model = test_model(true);
+        model.config.model = "gpt-5-mini".to_owned();
+
+        let body = model.request_body(&ModelRequest {
+            messages: vec![ModelMessage {
+                role: "user".to_owned(),
+                content: "Hello".to_owned(),
+            }],
+        });
+
+        assert!(body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn request_body_keeps_temperature_for_older_openai_chat_models() {
+        let model = test_model(true);
+
+        let body = model.request_body(&ModelRequest {
+            messages: vec![ModelMessage {
+                role: "user".to_owned(),
+                content: "Hello".to_owned(),
+            }],
+        });
+
+        assert!(body.get("temperature").is_some());
+    }
+
+    #[test]
+    fn request_body_keeps_nested_reasoning_for_non_openai_chat_completions() {
+        let mut model = test_model(true);
+        model.config.provider = "openrouter".to_owned();
+        model.config.endpoint = "https://example.com/v1/chat/completions".to_owned();
+        model.config.reasoning = Some(crate::ModelReasoningConfig {
+            effort: "medium".to_owned(),
+        });
+
+        let body = model.request_body(&ModelRequest {
+            messages: vec![ModelMessage {
+                role: "user".to_owned(),
+                content: "Hello".to_owned(),
+            }],
+        });
+
+        assert_eq!(
             body.pointer("/reasoning/effort").and_then(Value::as_str),
             Some("medium"),
         );
+        assert!(body.get("reasoning_effort").is_none());
     }
 }
 
 impl ModelGateway for OpenAiCompatibleModel {
     fn send_turn(&self, request: &ModelRequest) -> Result<ModelResponse> {
+        if !self.config.has_usable_api_key() {
+            return Err(anyhow!("OpenAI cloud profile is missing a valid API key."));
+        }
+
         let body = self.request_body(request);
         let prompt_json =
             serde_json::to_string_pretty(&body).context("failed to serialize prompt")?;
@@ -240,9 +392,7 @@ impl ModelGateway for OpenAiCompatibleModel {
             )
             .json(&body);
 
-        if !self.config.api_key.trim().is_empty() && self.config.api_key != "YOUR_KEY" {
-            builder = builder.header(AUTHORIZATION, format!("Bearer {}", self.config.api_key));
-        }
+        builder = builder.header(AUTHORIZATION, format!("Bearer {}", self.config.api_key));
 
         let response = builder.send().context("failed to reach model provider")?;
         let status = response.status();
@@ -275,6 +425,61 @@ impl ModelGateway for OpenAiCompatibleModel {
                     .context("failed to read model response body")?;
                 self.extract_message_content(&body)?
             };
+
+        Ok(ModelResponse {
+            prompt_json,
+            raw_output,
+            input_tokens,
+            output_tokens,
+            latency_ms,
+            http_status: Some(status.as_u16() as i64),
+        })
+    }
+
+    fn model_name(&self) -> &str {
+        &self.config.model
+    }
+}
+
+impl ModelGateway for GeminiModel {
+    fn send_turn(&self, request: &ModelRequest) -> Result<ModelResponse> {
+        if !self.config.has_usable_api_key() {
+            return Err(anyhow!("Gemini cloud profile is missing a valid API key."));
+        }
+
+        let body = self.request_body(request);
+        let prompt_json =
+            serde_json::to_string_pretty(&body).context("failed to serialize Gemini prompt")?;
+        let started_at = Instant::now();
+
+        let mut builder = self
+            .client
+            .post(&self.config.endpoint)
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json")
+            .json(&body);
+
+        builder = builder.header("x-goog-api-key", self.config.api_key.clone());
+
+        let response = builder.send().context("failed to reach Gemini provider")?;
+        let status = response.status();
+        let latency_ms = started_at.elapsed().as_millis() as i64;
+
+        if !status.is_success() {
+            let error_body = response
+                .text()
+                .unwrap_or_else(|_| "unreadable Gemini provider error".to_owned());
+            return Err(anyhow!(
+                "Gemini provider returned {} with body: {}",
+                status.as_u16(),
+                error_body
+            ));
+        }
+
+        let body = response
+            .text()
+            .context("failed to read Gemini response body")?;
+        let (raw_output, input_tokens, output_tokens) = self.extract_text(&body)?;
 
         Ok(ModelResponse {
             prompt_json,

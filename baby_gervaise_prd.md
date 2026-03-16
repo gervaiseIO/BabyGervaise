@@ -179,8 +179,7 @@ The following systems are intentionally excluded from Baby Gervaise.
 -   Activity Graph
 -   Orchestrator
 -   distributed nodes
--   model routing
--   local model runtime
+-   advanced model routing
 -   multi-device synchronization
 -   advanced scheduling
 -   developer extension systems
@@ -213,7 +212,7 @@ Interface\
 → HGIE\
 → Memory\
 → Tools\
-→ Models
+→ Model Runtime
 
 This structure allows quick iteration while preserving future
 architectural expansion.
@@ -253,10 +252,12 @@ This screen acts as a **system inspection dashboard**.
 
 ### Model Statistics
 
--   model name
+-   selected cloud profile
 -   total calls
 -   token usage
 -   latency metrics
+
+Overview may also show Nano readiness and cloud runtime details.
 
 ### Memory Statistics
 

@@ -18,7 +18,7 @@ It is a deliberately constrained Android-first prototype designed to validate:
 - the Human–Gervaise Interaction Engine (HGIE)
 - lightweight memory and retrieval
 - simple tool execution
-- one model provider through a single model module
+- one model runtime boundary with Nano-first interaction and optional cloud follow-up
 - fast iteration on interaction quality
 
 The architecture must remain intentionally small and easy to evolve.
@@ -292,14 +292,16 @@ This preserves control and explainability.
 
 ### 7.5 Models Module
 
-The Models module is the single gateway to the LLM provider.
+The Models module is the single gateway to runtime-managed models.
 
-Baby Gervaise uses **one model only**.
+Baby Gervaise uses a **Nano-first runtime** with optional cloud escalation.
 
 Responsibilities:
 
-- load provider configuration
-- call the configured external API
+- load Nano and cloud profile configuration
+- expose one clean runtime boundary to HGIE
+- keep provider-specific transport behind the runtime
+- call the configured cloud API when escalation is allowed
 - track latency
 - track token usage
 - record raw prompt and raw output
@@ -308,6 +310,10 @@ Responsibilities:
 The user does not choose models in the UI.
 
 Model selection remains internal.
+
+Overview may expose diagnostics and cloud profile selection for development.
+
+Main chat still presents only Gervaise.
 
 Configuration is edited before build through a config file.
 

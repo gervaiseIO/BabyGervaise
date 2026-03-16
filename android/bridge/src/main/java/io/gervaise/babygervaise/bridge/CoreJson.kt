@@ -22,6 +22,9 @@ object CoreJson {
     fun decodeOverviewSnapshot(payloadJson: String): OverviewSnapshot =
         json.decodeFromString(payloadJson)
 
+    fun decodeToolExecutionResult(payloadJson: String): ToolExecutionResult =
+        json.decodeFromString(payloadJson)
+
     fun prettyPrint(value: JsonElement): String =
         prettyJson.encodeToString(JsonElement.serializer(), value)
 
@@ -69,6 +72,11 @@ object CoreJson {
             "config_updated" -> {
                 val payload = json.decodeFromString<ConfigUpdatedPayload>(payloadJson)
                 CoreEvent.ConfigUpdated(level = payload.level)
+            }
+
+            "diagnostic_log" -> {
+                val payload = json.decodeFromString<DebugLogEntry>(payloadJson)
+                CoreEvent.DebugLog(entry = payload)
             }
 
             else -> error("Unsupported core event type: $eventType")

@@ -12,14 +12,17 @@ OUTPUT_DIR="$3"
 ANDROID_API="$4"
 ANDROID_ABI="$5"
 RUST_TARGET="$6"
-TMPDIR_ROOT="$WORKSPACE_ROOT/rust_core/target/android-tmp"
+CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$WORKSPACE_ROOT/rust_core/target}"
+TMPDIR_ROOT="${TMPDIR_ROOT:-$CARGO_TARGET_DIR/android-tmp}"
 
+mkdir -p "$CARGO_TARGET_DIR"
 mkdir -p "$TMPDIR_ROOT"
 export TMPDIR="${TMPDIR:-$TMPDIR_ROOT}"
 export TMP="${TMP:-$TMPDIR}"
 export TEMP="${TEMP:-$TMPDIR}"
 export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+export CARGO_TARGET_DIR
 
 SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
 NDK_ROOT="${ANDROID_NDK_HOME:-}"
@@ -150,7 +153,7 @@ fi
 echo "Building baby_gervaise_core for $ANDROID_ABI ($RUST_TARGET, profile=$PROFILE)"
 "$CARGO_BIN" "${CARGO_ARGS[@]}"
 
-ARTIFACT_DIR="$WORKSPACE_ROOT/rust_core/target/$RUST_TARGET/$PROFILE"
+ARTIFACT_DIR="$CARGO_TARGET_DIR/$RUST_TARGET/$PROFILE"
 ARTIFACT_PATH="$ARTIFACT_DIR/libbaby_gervaise_core.so"
 
 if [[ ! -f "$ARTIFACT_PATH" ]]; then
